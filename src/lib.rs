@@ -24,46 +24,54 @@
 //! ```
 //! use tobj;
 //!
-//! let cornell_box = tobj::load_obj("cornell_box.obj");
+//! let cornell_box = tobj::load_obj("cornell_box.obj", true);
 //! assert!(cornell_box.is_ok());
 //! let (models, materials) = cornell_box.unwrap();
 //!
 //! println!("# of models: {}", models.len());
 //! println!("# of materials: {}", materials.len());
 //! for (i, m) in models.iter().enumerate() {
-//! 	let mesh = &m.mesh;
-//! 	println!("model[{}].name = \'{}\'", i, m.name);
-//! 	println!("model[{}].mesh.material_id = {:?}", i, mesh.material_id);
+//!     let mesh = &m.mesh;
+//!     println!("model[{}].name = \'{}\'", i, m.name);
+//!     println!("model[{}].mesh.material_id = {:?}", i, mesh.material_id);
 //!
-//! 	println!("Size of model[{}].indices: {}", i, mesh.indices.len());
-//! 	for f in 0..mesh.indices.len() / 3 {
-//! 		println!("    idx[{}] = {}, {}, {}.", f, mesh.indices[3 * f],
-//! 			mesh.indices[3 * f + 1], mesh.indices[3 * f + 2]);
-//! 	}
+//!     println!("Size of model[{}].num_face_indices: {}", i, mesh.num_face_indices.len());
+//!     let mut next_face = 0;
+//!     for f in 0..mesh.num_face_indices.len() {
+//!         let end = next_face + mesh.num_face_indices[f] as usize;
+//!         let face_indices: Vec<_> = mesh.indices[next_face..end].iter().collect();
+//!         println!("    face[{}] = {:?}", f, face_indices);
+//!         next_face = end;
+//!     }
 //!
-//! 	// Normals and texture coordinates are also loaded, but not printed in this example
-//! 	println!("model[{}].vertices: {}", i, mesh.positions.len() / 3);
-//! 	assert!(mesh.positions.len() % 3 == 0);
-//! 	for v in 0..mesh.positions.len() / 3 {
-//! 		println!("    v[{}] = ({}, {}, {})", v, mesh.positions[3 * v],
-//! 			mesh.positions[3 * v + 1], mesh.positions[3 * v + 2]);
-//! 	}
+//!     // Normals and texture coordinates are also loaded, but not printed in this example
+//!     println!("model[{}].vertices: {}", i, mesh.positions.len() / 3);
+//!     assert!(mesh.positions.len() % 3 == 0);
+//!     for v in 0..mesh.positions.len() / 3 {
+//!         println!("    v[{}] = ({}, {}, {})", v, mesh.positions[3 * v],
+//!         mesh.positions[3 * v + 1], mesh.positions[3 * v + 2]);
+//!     }
 //! }
+//!
 //! for (i, m) in materials.iter().enumerate() {
-//! 	println!("material[{}].name = \'{}\'", i, m.name);
-//! 	println!("    material.Ka = ({}, {}, {})", m.ambient[0], m.ambient[1], m.ambient[2]);
-//! 	println!("    material.Kd = ({}, {}, {})", m.diffuse[0], m.diffuse[1], m.diffuse[2]);
-//! 	println!("    material.Ks = ({}, {}, {})", m.specular[0], m.specular[1], m.specular[2]);
-//! 	println!("    material.Ns = {}", m.shininess);
-//! 	println!("    material.d = {}", m.dissolve);
-//! 	println!("    material.map_Ka = {}", m.ambient_texture);
-//! 	println!("    material.map_Kd = {}", m.diffuse_texture);
-//! 	println!("    material.map_Ks = {}", m.specular_texture);
-//! 	println!("    material.map_Ns = {}", m.normal_texture);
-//! 	println!("    material.map_d = {}", m.dissolve_texture);
-//! 	for (k, v) in &m.unknown_param {
-//! 		println!("    material.{} = {}", k, v);
-//! 	}
+//!     println!("material[{}].name = \'{}\'", i, m.name);
+//!     println!("    material.Ka = ({}, {}, {})", m.ambient[0], m.ambient[1],
+//!     m.ambient[2]);
+//!     println!("    material.Kd = ({}, {}, {})", m.diffuse[0], m.diffuse[1],
+//!     m.diffuse[2]);
+//!     println!("    material.Ks = ({}, {}, {})", m.specular[0], m.specular[1],
+//!     m.specular[2]);
+//!     println!("    material.Ns = {}", m.shininess);
+//!     println!("    material.d = {}", m.dissolve);
+//!     println!("    material.map_Ka = {}", m.ambient_texture);
+//!     println!("    material.map_Kd = {}", m.diffuse_texture);
+//!     println!("    material.map_Ks = {}", m.specular_texture);
+//!     println!("    material.map_Ns = {}", m.shininess_texture);
+//!     println!("    material.map_Bump = {}", m.normal_texture);
+//!     println!("    material.map_d = {}", m.dissolve_texture);
+//!     for (k, v) in &m.unknown_param {
+//!         println!("    material.{} = {}", k, v);
+//!     }
 //! }
 //! ```
 //!
@@ -125,7 +133,7 @@ use std::str::{FromStr, SplitWhitespace};
 /// corresponding Vec will be empty.
 ///
 /// ```
-/// let cornell_box = tobj::load_obj("cornell_box.obj");
+/// let cornell_box = tobj::load_obj("cornell_box.obj", true);
 /// assert!(cornell_box.is_ok());
 /// let (models, materials) = cornell_box.unwrap();
 ///
@@ -157,25 +165,21 @@ pub struct Mesh {
     /// the mesh. Not all meshes have normals, if no texture coordinates are specified this Vec
     /// will be empty
     pub texcoords: Vec<f32>,
-    /// Indices for vertices of each triangle. Each face in the mesh is a triangle and the indices
-    /// specify the position, normal and texture coordinate for each vertex of the face.
+    /// Indices for vertices of each triangle. If loaded with `triangulate_faces`, each face in the
+    /// mesh is a triangle, otherwise the `num_face_indices` vector indicates how many indices
+    /// are used by each face. The indices specify the position, normal and texture coordinate
+    /// for each vertex of the face.
     pub indices: Vec<u32>,
+    /// The number of vertices used by each face. When using non-triangulated faces, the offset
+    /// for the starting index of a face can be found by iterating through the `num_face_indices`
+    /// until reaching the desired face, accumulating the number of vertices used so far.
+    pub num_face_indices: Vec<u32>,
     /// Optional material id associated with this mesh. The material id indexes into the Vec of
     /// Materials loaded from the associated MTL file
     pub material_id: Option<usize>,
 }
 
 impl Mesh {
-    /// Create a new mesh specifying the geometry for the mesh
-    pub fn new(positions: Vec<f32>, normals: Vec<f32>, texcoords: Vec<f32>, indices: Vec<u32>, material_id: Option<usize>) -> Mesh {
-        Mesh {
-            positions,
-            normals,
-            texcoords,
-            indices,
-            material_id,
-        }
-    }
     /// Create a new empty mesh
     pub fn empty() -> Mesh {
         Mesh {
@@ -183,6 +187,7 @@ impl Mesh {
             normals: Vec::new(),
             texcoords: Vec::new(),
             indices: Vec::new(),
+            num_face_indices: Vec::new(),
             material_id: None,
         }
     }
@@ -239,6 +244,9 @@ pub struct Material {
     /// Name of the normal map texture file for the material. No path is pre-pended to the texture
     /// file names specified in the MTL file
     pub normal_texture: String,
+    /// Name of the shininess map texture file for the material. No path is pre-pended to the texture
+    /// file names specified in the MTL file
+    pub shininess_texture: String,
     /// Name of the alpha map texture file for the material. No path is pre-pended to the texture
     /// file names specified in the MTL file. Referred to as dissolve to match the MTL file format
     /// specification
@@ -264,6 +272,7 @@ impl Material {
             diffuse_texture: String::new(),
             specular_texture: String::new(),
             normal_texture: String::new(),
+            shininess_texture: String::new(),
             dissolve_texture: String::new(),
             illumination_model: None,
             unknown_param: HashMap::new(),
@@ -475,7 +484,14 @@ fn add_vertex(
 }
 
 /// Export a list of faces to a mesh and return it, converting quads to tris
-fn export_faces(pos: &[f32], texcoord: &[f32], normal: &[f32], faces: &[Face], mat_id: Option<usize>) -> Result<Mesh, LoadError> {
+fn export_faces(
+    pos: &[f32],
+    texcoord: &[f32],
+    normal: &[f32],
+    faces: &[Face],
+    mat_id: Option<usize>,
+    triangulate_faces: bool,
+) -> Result<Mesh, LoadError> {
     let mut index_map = HashMap::new();
     let mut mesh = Mesh::empty();
     mesh.material_id = mat_id;
@@ -486,29 +502,49 @@ fn export_faces(pos: &[f32], texcoord: &[f32], normal: &[f32], faces: &[Face], m
             Face::Line(ref a, ref b) => {
                 add_vertex(&mut mesh, &mut index_map, a, pos, texcoord, normal)?;
                 add_vertex(&mut mesh, &mut index_map, b, pos, texcoord, normal)?;
+                mesh.num_face_indices.push(2);
             }
             Face::Triangle(ref a, ref b, ref c) => {
                 add_vertex(&mut mesh, &mut index_map, a, pos, texcoord, normal)?;
                 add_vertex(&mut mesh, &mut index_map, b, pos, texcoord, normal)?;
                 add_vertex(&mut mesh, &mut index_map, c, pos, texcoord, normal)?;
+                mesh.num_face_indices.push(3);
             }
             Face::Quad(ref a, ref b, ref c, ref d) => {
-                add_vertex(&mut mesh, &mut index_map, a, pos, texcoord, normal)?;
-                add_vertex(&mut mesh, &mut index_map, b, pos, texcoord, normal)?;
-                add_vertex(&mut mesh, &mut index_map, c, pos, texcoord, normal)?;
-
-                add_vertex(&mut mesh, &mut index_map, a, pos, texcoord, normal)?;
-                add_vertex(&mut mesh, &mut index_map, c, pos, texcoord, normal)?;
-                add_vertex(&mut mesh, &mut index_map, d, pos, texcoord, normal)?;
-            }
-            Face::Polygon(ref indices) => {
-                let a = &indices[0];
-                let mut b = &indices[1];
-                for c in indices.iter().skip(2) {
+                if triangulate_faces {
                     add_vertex(&mut mesh, &mut index_map, a, pos, texcoord, normal)?;
                     add_vertex(&mut mesh, &mut index_map, b, pos, texcoord, normal)?;
                     add_vertex(&mut mesh, &mut index_map, c, pos, texcoord, normal)?;
-                    b = c;
+                    mesh.num_face_indices.push(3);
+
+                    add_vertex(&mut mesh, &mut index_map, a, pos, texcoord, normal)?;
+                    add_vertex(&mut mesh, &mut index_map, c, pos, texcoord, normal)?;
+                    add_vertex(&mut mesh, &mut index_map, d, pos, texcoord, normal)?;
+                    mesh.num_face_indices.push(3);
+                } else {
+                    add_vertex(&mut mesh, &mut index_map, a, pos, texcoord, normal)?;
+                    add_vertex(&mut mesh, &mut index_map, b, pos, texcoord, normal)?;
+                    add_vertex(&mut mesh, &mut index_map, c, pos, texcoord, normal)?;
+                    add_vertex(&mut mesh, &mut index_map, d, pos, texcoord, normal)?;
+                    mesh.num_face_indices.push(4);
+                }
+            }
+            Face::Polygon(ref indices) => {
+                if triangulate_faces {
+                    let a = &indices[0];
+                    let mut b = &indices[1];
+                    for c in indices.iter().skip(2) {
+                        add_vertex(&mut mesh, &mut index_map, a, pos, texcoord, normal)?;
+                        add_vertex(&mut mesh, &mut index_map, b, pos, texcoord, normal)?;
+                        add_vertex(&mut mesh, &mut index_map, c, pos, texcoord, normal)?;
+                        mesh.num_face_indices.push(3);
+                        b = c;
+                    }
+                } else {
+                    for i in indices.iter() {
+                        add_vertex(&mut mesh, &mut index_map, i, pos, texcoord, normal)?;
+                    }
+                    mesh.num_face_indices.push(indices.len() as u32);
                 }
             }
         }
@@ -518,7 +554,7 @@ fn export_faces(pos: &[f32], texcoord: &[f32], normal: &[f32], faces: &[Face], m
 
 /// Load the various objects specified in the OBJ file and any associated MTL file
 /// Returns a pair of Vecs containing the loaded models and materials from the file.
-pub fn load_obj<P>(file_name: P) -> LoadResult
+pub fn load_obj<P>(file_name: P, triangulate_faces: bool) -> LoadResult
 where
     P: AsRef<Path> + fmt::Debug,
 {
@@ -531,7 +567,7 @@ where
         }
     };
     let mut reader = BufReader::new(file);
-    load_obj_buf(&mut reader, |mat_path| {
+    load_obj_buf(&mut reader, triangulate_faces, |mat_path| {
         let full_path = if let Some(parent) = file_name.as_ref().parent() {
             parent.join(mat_path)
         } else {
@@ -590,7 +626,7 @@ where
 /// let mut cornell_box_mtl2 = dir.clone();
 /// cornell_box_mtl2.push("cornell_box2.mtl");
 ///
-/// let m = tobj::load_obj_buf(&mut cornell_box_file, |p| {
+/// let m = tobj::load_obj_buf(&mut cornell_box_file, true, |p| {
 ///     match p.file_name().unwrap().to_str().unwrap() {
 ///         "cornell_box.mtl" => {
 ///             let f = File::open(cornell_box_mtl1.as_path()).unwrap();
@@ -604,7 +640,7 @@ where
 ///     }
 /// });
 /// ```
-pub fn load_obj_buf<B, ML>(reader: &mut B, material_loader: ML) -> LoadResult
+pub fn load_obj_buf<B, ML>(reader: &mut B, triangulate_faces: bool, material_loader: ML) -> LoadResult
 where
     B: BufRead,
     ML: Fn(&Path) -> MTLLoadResult,
@@ -658,7 +694,10 @@ where
                 // If we were already parsing an object then a new object name
                 // signals the end of the current one, so push it onto our list of objects
                 if !tmp_faces.is_empty() {
-                    models.push(Model::new(export_faces(&tmp_pos, &tmp_texcoord, &tmp_normal, &tmp_faces, mat_id)?, name));
+                    models.push(Model::new(
+                        export_faces(&tmp_pos, &tmp_texcoord, &tmp_normal, &tmp_faces, mat_id, triangulate_faces)?,
+                        name,
+                    ));
                     tmp_faces.clear();
                 }
                 name = line[1..].trim().to_owned();
@@ -693,7 +732,7 @@ where
                     // has to emit a new model with the same name but different material
                     if mat_id != new_mat && !tmp_faces.is_empty() {
                         models.push(Model::new(
-                            export_faces(&tmp_pos, &tmp_texcoord, &tmp_normal, &tmp_faces, mat_id)?,
+                            export_faces(&tmp_pos, &tmp_texcoord, &tmp_normal, &tmp_faces, mat_id, triangulate_faces)?,
                             name.clone(),
                         ));
                         tmp_faces.clear();
@@ -713,7 +752,10 @@ where
     }
     // For the last object in the file we won't encounter another object name to tell us when it's
     // done, so if we're parsing an object push the last one on the list as well
-    models.push(Model::new(export_faces(&tmp_pos, &tmp_texcoord, &tmp_normal, &tmp_faces, mat_id)?, name));
+    models.push(Model::new(
+        export_faces(&tmp_pos, &tmp_texcoord, &tmp_normal, &tmp_faces, mat_id, triangulate_faces)?,
+        name,
+    ));
     Ok((models, materials))
 }
 
@@ -807,6 +849,10 @@ pub fn load_mtl_buf<B: BufRead>(reader: &mut B) -> MTLLoadResult {
                 Some("") | None => return Err(LoadError::MaterialParseError),
                 Some(tex) => cur_mat.normal_texture = tex.to_owned(),
             },
+            Some("map_Ns") | Some("map_ns") | Some("map_NS") => match line.get(6..).map(str::trim) {
+                Some("") | None => return Err(LoadError::MaterialParseError),
+                Some(tex) => cur_mat.shininess_texture = tex.to_owned(),
+            },
             Some("bump") => match line.get(4..).map(str::trim) {
                 Some("") | None => return Err(LoadError::MaterialParseError),
                 Some(tex) => cur_mat.normal_texture = tex.to_owned(),
@@ -839,92 +885,4 @@ pub fn load_mtl_buf<B: BufRead>(reader: &mut B) -> MTLLoadResult {
         materials.push(cur_mat);
     }
     Ok((materials, mat_map))
-}
-
-/// Print out all loaded properties of some models and associated materials
-pub fn print_model_info(models: &[Model], materials: &[Material]) {
-    println!("# of models: {}", models.len());
-    println!("# of materials: {}", materials.len());
-    for (i, m) in models.iter().enumerate() {
-        let mesh = &m.mesh;
-        println!("model[{}].name = \'{}\'", i, m.name);
-        println!("model[{}].mesh.material_id = {:?}", i, mesh.material_id);
-
-        println!("Size of model[{}].indices: {}", i, mesh.indices.len());
-        for f in 0..mesh.indices.len() / 3 {
-            println!(
-                "    idx[{}] = {}, {}, {}.",
-                f,
-                mesh.indices[3 * f],
-                mesh.indices[3 * f + 1],
-                mesh.indices[3 * f + 2]
-            );
-        }
-
-        println!("model[{}].vertices: {}", i, mesh.positions.len() / 3);
-        println!("model[{}].normals: {}", i, mesh.normals.len() / 3);
-        println!("model[{}].texcoords: {}", i, mesh.texcoords.len() / 2);
-        assert_eq!(mesh.positions.len() % 3, 0);
-        assert_eq!(mesh.normals.len() % 3, 0);
-        assert_eq!(mesh.texcoords.len() % 2, 0);
-        for v in 0..mesh.positions.len() / 3 {
-            println!(
-                "    v[{}] = ({}, {}, {})",
-                v,
-                mesh.positions[3 * v],
-                mesh.positions[3 * v + 1],
-                mesh.positions[3 * v + 2]
-            );
-            if !mesh.normals.is_empty() {
-                println!(
-                    "    vn[{}] = ({}, {}, {})",
-                    v,
-                    mesh.normals[3 * v],
-                    mesh.normals[3 * v + 1],
-                    mesh.normals[3 * v + 2]
-                );
-            }
-            if !mesh.texcoords.is_empty() {
-                println!("    vt[{}] = ({}, {})", v, mesh.texcoords[2 * v], mesh.texcoords[2 * v + 1]);
-            }
-        }
-    }
-    print_material_info(materials);
-}
-
-/// Print out all loaded properties of some materials
-pub fn print_material_info(materials: &[Material]) {
-    for (i, m) in materials.iter().enumerate() {
-        println!("material[{}].name = \'{}\'", i, m.name);
-        println!("    material.Ka = ({}, {}, {})", m.ambient[0], m.ambient[1], m.ambient[2]);
-        println!("    material.Kd = ({}, {}, {})", m.diffuse[0], m.diffuse[1], m.diffuse[2]);
-        println!("    material.Ks = ({}, {}, {})", m.specular[0], m.specular[1], m.specular[2]);
-        println!("    material.Ns = {}", m.shininess);
-        println!("    material.d = {}", m.dissolve);
-        println!("    material.map_Ka = {}", m.ambient_texture);
-        println!("    material.map_Kd = {}", m.diffuse_texture);
-        println!("    material.map_Ks = {}", m.specular_texture);
-        println!("    material.map_Ns = {}", m.normal_texture);
-        println!("    material.map_d = {}", m.dissolve_texture);
-        for (k, v) in &m.unknown_param {
-            println!("    material.{} = {}", k, v);
-        }
-    }
-}
-
-#[cfg(all(test, feature = "unstable"))]
-mod benches {
-    use super::load_obj;
-    use std::path::Path;
-    use test::Bencher;
-
-    #[bench]
-    fn bench_cornell(b: &mut Bencher) {
-        let path = Path::new("cornell_box.obj");
-        b.iter(|| {
-            let m = load_obj(path);
-            assert!(m.is_ok());
-            m.is_ok()
-        });
-    }
 }
